@@ -69,7 +69,10 @@
 
 <div class="sidenav" id="navTop" style="position:relative;">
     <a id="temp" style="padding-left: 3%;">0&#176C </a>
-    <a id="volt" style="padding-right: 3%;">0V</a>
+    <a id="FPS" style="padding-right: 3%;">0 FPS</a>
+    <a id="status" style="padding-right: 3%;">Welcome onboard!</a>
+    <a id="pilotStatus" style="padding-right: 3%;">Spectator</a>
+
     <script>
         //---------------- camera stuff-------------------------
 
@@ -102,8 +105,15 @@
         };
 
         function toStatus(txt) {
-            // document.getElementById('status').innerHTML = txt;
-            console.log(txt);
+            document.getElementById('status').innerHTML = txt;
+        }
+
+        function toFps(txt) {
+            document.getElementById('FPS').innerHTML = txt + " FPS";
+        }
+
+        function toPilotStatus(txt) {
+            document.getElementById('pilotStatus').innerHTML = txt;
         }
 
         const Vector2 = function (x, y) {
@@ -156,6 +166,9 @@
 
         var temperature;
         var sendFlag = false;
+        var isPilot = false;
+
+        var imageCounterFps = 0;
 
         setupCanvas();
 
@@ -166,9 +179,12 @@
 
         let headlight = 0;
 
-        setInterval(draw, 1000 / 30); // draw app at 30fps
+        var timerDrawApp = setInterval(draw, 1000 / 30); // draw app at 30fps
+        clearInterval(timerDrawApp); // release timer since no pilot by default
 
         setInterval(sendControls, 1000 / 10); // send control input at 10fps
+
+        setInterval(calculateFps, 1000);
 
 
         canvas.addEventListener('touchstart', onTouchStart, false);
@@ -318,18 +334,27 @@
 
             let voltage;
             if (typeof event.data === 'string') {
+                console.log('Data received: ' + event.data);
+                console.log(typeof event.data);
                 const msgReceived = JSON.parse(event.data);
                 console.log(msgReceived);
-                if (msgReceived.hasOwnProperty('temp')) {
-                    temperature = parseInt(msgReceived.temp);
-                    document.getElementById("temp").innerHTML = temperature + '&#176C';
-                }
-                if (msgReceived.hasOwnProperty('volt')) {
-                    voltage = parseFloat(msgReceived.volt).toFixed(2);
-                    document.getElementById("volt").innerHTML = voltage + 'V';
+                if (msgReceived.hasOwnProperty('isPilot')) {
+                    const isPilotServer = parseInt(msgReceived.isPilot);
+                    if (isPilotServer) {
+                        isPilot = true;
+                        clearInterval(timerDrawApp);
+                        timerDrawApp = setInterval(draw, 1000 / 30);
+                        toPilotStatus("Pilot");
+                    } else {
+                        isPilot = false;
+                        clearInterval(timerDrawApp);
+                        toPilotStatus("Spectator");
+                    }
                 }
             } else {
                 console.log('New image received');
+                imageCounterFps++;
+
                 const pixels = new Uint8Array(event.data);
 
                 const blob = new Blob(
@@ -346,7 +371,7 @@
 
         function resizeStream() {
             const img = document.getElementById("imgStream");
-            const ratio = Math.round(320/240);
+            const ratio = Math.round(320 / 240);
 
             if (canvas.clientWidth < canvas.clientHeight) {
                 img.style.width = canvas.clientWidth + "px";
@@ -506,7 +531,7 @@
         }
 
         function sendControls() {
-            if (sendFlag == true) {
+            if (sendFlag === true && isPilot === true) {
                 leftVector.x = Math.min(Math.max(parseInt(leftVector.x), -255), 255);
                 leftVector.y = Math.min(Math.max(parseInt(leftVector.y), -255), 255);
 
@@ -521,6 +546,12 @@
                 websock.send(JSON.stringify({cmd: "pos", val: leftMot, val2: rightMot}));
                 sendFlag = false;
             }
+        }
+
+        function calculateFps() {
+            const fps = imageCounterFps;
+            toFps(fps.toString());
+            imageCounterFps = 0;
         }
 
 
@@ -550,6 +581,13 @@
             websock.send(JSON.stringify({cmd: "light", val: headlight}));
         }
 
+        function handlePilotRequestClick(cb) {
+            if (isPilot) {
+                websock.send(JSON.stringify({"pilot": 0}));
+            } else {
+                websock.send(JSON.stringify({"pilot": 1}));
+            }
+        }
 
     </script>
 </div>
@@ -567,6 +605,8 @@
        type="button">CAM</a>
     <a class="button light" id="light" onclick="handleHeadlightClick()" style="transition: background 0.4s;"
        type="button">LIGHT</a>
+    <a class="button light" id="pilot" onclick="handlePilotRequestClick()" style="transition: background 0.4s;"
+       type="button">PILOT!</a>
 </div>
 <script>resizeStream();</script>
 </body>

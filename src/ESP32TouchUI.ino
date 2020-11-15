@@ -35,10 +35,11 @@ WebSocketsServer webSocket(81);    // create a websocket server on port 81
 WebServer wifiServer(80);
 WiFiMulti wiFiMulti;
 constexpr uint8_t maxClients{10};
-constexpr uint8_t FPS{20};
+constexpr uint8_t FPS{50};
 
 // frameSync semaphore is used to prevent streaming buffer as it is replaced with the next frame
 SemaphoreHandle_t frameSync = NULL;
+SemaphoreHandle_t sendWebSocketData = NULL;
 
 
 // ===== rtos task handles =========================
@@ -51,20 +52,39 @@ TaskHandle_t tCaptureCamera;     // handles getting picture frames from the came
 volatile size_t camSize{};    // size of the current frame, byte
 volatile uint8_t *camBuf;      // pointer to the current frame
 
-struct StreamInfo {
+constexpr uint8_t invalidWebSocketId{0xFF};
+
+struct StreamInfo
+{
     uint8_t *buffer{};
     size_t len{};
-    uint8_t webSocketClientId{};
+    uint8_t webSocketClientId{invalidWebSocketId};
     bool isActive{false};
+    bool isPilot{false};
+    bool isPilotInformed{true};
 };
 
 StreamInfo streamInfoAllClients[maxClients];
 
+uint8_t getIndexBywebsocketId(const uint8_t &webSocketClientId)
+{
+    for (const auto &streamInfoAllClient : streamInfoAllClients)
+    {
+        if (webSocketClientId == streamInfoAllClient.webSocketClientId)
+        {
+            return webSocketClientId;
+        }
+    }
+    return invalidWebSocketId;
+}
+
 // ==== Memory allocator that takes advantage of PSRAM if present =======================
-uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
+uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize)
+{
 
     //  Since current buffer is too small, free it
-    if (aPtr != NULL) {
+    if (aPtr != NULL)
+    {
         free(aPtr);
     }
 
@@ -72,7 +92,8 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
     ptr = (uint8_t *) ps_malloc(aSize);
 
     // If the memory pointer is NULL, we were not able to allocate any memory, and that is a terminal condition.
-    if (ptr == NULL) {
+    if (ptr == NULL)
+    {
         Serial.println("Out of memory!");
         delay(5000);
         ESP.restart();
@@ -84,8 +105,12 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
 
 
 // ==== Actually stream content to all connected clients ========================
-[[noreturn]] void taskSteamWebsocket(void *pvParameters) {
+[[noreturn]] void taskSteamWebsocket(void *pvParameters)
+{
     Serial.println("Init taskSteamWebsocket");
+    constexpr uint8_t averageSize{FPS};
+    uint16_t average[averageSize];
+    uint8_t averageIndex{0};
 
     TickType_t xLastWakeTime;
     TickType_t xFrequency;
@@ -99,14 +124,18 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
     uint8_t *bufferToSend = {NULL};
     size_t bufferToSendSize = {0};
 
-    for (;;) {
+    for (;;)
+    {
         const unsigned long lastMilliTransWifi = xTaskGetTickCount();
         xSemaphoreTake(frameSync, portMAX_DELAY);
-        if (bufferToSend == NULL && camSize > 0) {
+        if (bufferToSend == NULL && camSize > 0)
+        {
             bufferToSend = allocateMemory(bufferToSend, camSize);
             bufferToSendSize = camSize;
-        } else {
-            if (camSize > bufferToSendSize) {
+        } else
+        {
+            if (camSize > bufferToSendSize)
+            {
                 bufferToSend = allocateMemory(bufferToSend, camSize);
                 bufferToSendSize = camSize;
             }
@@ -114,16 +143,46 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
         memcpy(bufferToSend, (const void *) camBuf, bufferToSendSize);
         xSemaphoreGive(frameSync);
 
-        for (const auto &streamInfoAllClient : streamInfoAllClients) {
-            if (streamInfoAllClient.isActive) {
-                webSocket.sendBIN(streamInfoAllClient.webSocketClientId, bufferToSend, bufferToSendSize);
+        for (auto &streamInfoAllClient : streamInfoAllClients)
+        {
+            if (streamInfoAllClient.isActive)
+            {
+                const bool successSend = webSocket.sendBIN(streamInfoAllClient.webSocketClientId, bufferToSend,
+                                                           bufferToSendSize);
+                if (not streamInfoAllClient.isPilotInformed)
+                {
+                    if (streamInfoAllClient.isPilot)
+                    {
+                        webSocket.sendTXT(streamInfoAllClient.webSocketClientId, "{\"isPilot\":1}");
+                    } else
+                    {
+                        webSocket.sendTXT(streamInfoAllClient.webSocketClientId, "{\"isPilot\":0}");
+                    }
+                    streamInfoAllClient.isPilotInformed = true;
+                }
+                if (not successSend)
+                {
+                    Serial.println("Unsuccess sending");
+                }
             }
         }
 
         const unsigned long currentTick = xTaskGetTickCount();
-        Serial.printf("taskSteamWebsocket: %lums, wifi send: %lums\n", currentTick - lastMilli,
-                      currentTick - lastMilliTransWifi);
-        lastMilli = currentTick;
+//        Serial.printf("taskSteamWebsocket: %lums, wifi send: %lums\n", currentTick - lastMilli,
+//                      currentTick - lastMilliTransWifi);
+//        lastMilli = currentTick;
+        average[averageIndex++] = currentTick - lastMilliTransWifi;
+
+        if (averageIndex == averageSize)
+        {
+            averageIndex = 0;
+            uint32_t avgResult{};
+            for (const auto &avg : average)
+            {
+                avgResult += avg;
+            }
+            Serial.printf("taskSteamWebsocket avg: %d\n", avgResult / averageSize);
+        }
 
         taskYIELD();
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -131,7 +190,8 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
 }
 
 // ==== Handle connection request from clients ===============================
-[[noreturn]] void taskCaptureImageFromCamera(void *pvParameters) {
+[[noreturn]] void taskCaptureImageFromCamera(void *pvParameters)
+{
     Serial.println("Init taskCaptureImageFromCamera");
 
     TickType_t xLastWakeTime;
@@ -149,7 +209,8 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
 
     unsigned long lastMilli = xTaskGetTickCount();
 
-    for (;;) {
+    for (;;)
+    {
 //        Serial.print("Capturing image");
         //  Grab a frame from the camera and query its size
         camera_fb_t *fb = NULL;
@@ -158,7 +219,8 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
         size_t s = fb->len;
 
         //  If frame size is more that we have previously allocated - request  125% of the current frame space
-        if (s > fSize[ifb]) {
+        if (s > fSize[ifb])
+        {
             fSize[ifb] = s + s;
             fbs[ifb] = allocateMemory(fbs[ifb], fSize[ifb]);
         }
@@ -168,9 +230,9 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
         memcpy(fbs[ifb], b, s);
         esp_camera_fb_return(fb);
 
-        const unsigned long currentTick = xTaskGetTickCount();
-        Serial.printf("taskCaptureImageFromCamera: %lums\n", currentTick - lastMilli);
-        lastMilli = currentTick;
+//        const unsigned long currentTick = xTaskGetTickCount();
+//        Serial.printf("taskCaptureImageFromCamera: %lums\n", currentTick - lastMilli);
+//        lastMilli = currentTick;
 
         //  Let other tasks run and wait until the end of the current frame rate interval (if any time left)
         taskYIELD();
@@ -195,7 +257,8 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize) {
 }
 
 // ==== Handle connection request from clients ===============================
-void steamServerHtml(void) {
+void steamServerHtml(void)
+{
     Serial.printf("new client, sending base of html page\n");
 
     auto client = wifiServer.client();
@@ -209,7 +272,8 @@ void steamServerHtml(void) {
 
 
 // ==== Handle connection request from clients ===============================
-void handleNotFound(void) {
+void handleNotFound(void)
+{
     auto client = wifiServer.client();
 
     client.println("HTTP/1.1 200 OK");
@@ -221,7 +285,8 @@ void handleNotFound(void) {
 
 
 // ======== Server Connection Handler Task ==========================
-[[noreturn]] void mainLoop(void *pvParameters) {
+[[noreturn]] void mainLoop(void *pvParameters)
+{
     TickType_t xLastWakeTime;
     constexpr uint8_t WSINTERVAL = 50; // We will handle web client requests every 100 ms (10 Hz)
 
@@ -237,21 +302,21 @@ void handleNotFound(void) {
     xTaskCreatePinnedToCore(
             taskCaptureImageFromCamera,        // callback
             "taskCaptureImageFromCamera",           // name
-            4 * 1024,    // stacj size
-            NULL,                    // parameters
-            2,              // priority
-            &tCaptureCamera,    // RTOS task handle
-            PRO_CPU);           // core
+            4 * 1024,
+            NULL,
+            2,
+            &tCaptureCamera,
+            PRO_CPU);
 
     //  Creating RTOS task for grabbing frames from the camera
     xTaskCreatePinnedToCore(
-            taskSteamWebsocket,        // callback
-            "taskSteamWebsocket",           // name
-            4 * 1024,    // stacj size
-            NULL,                    // parameters
-            2,              // priority
-            &tStreamgWebSocket,    // RTOS task handle
-            APP_CPU);               // core
+            taskSteamWebsocket,
+            "taskSteamWebsocket",
+            4 * 1024,
+            NULL,
+            2,
+            &tStreamgWebSocket,
+            APP_CPU);
 
 
     //  Registering webserver handling routines
@@ -263,7 +328,8 @@ void handleNotFound(void) {
 
     //=== loop() section  ===================
     xLastWakeTime = xTaskGetTickCount();
-    for (;;) {
+    for (;;)
+    {
         wifiServer.handleClient();
         webSocket.loop();
 
@@ -277,30 +343,38 @@ void handleNotFound(void) {
 void onWebSocketEvent(uint8_t num,
                       WStype_t type,
                       uint8_t *payload,
-                      size_t length) {
+                      size_t length)
+{
 
     // Figure out the type of WebSocket event
-    switch (type) {
+    switch (type)
+    {
 
         // Client has disconnected
         case WStype_DISCONNECTED:
             Serial.printf("[%u] Disconnected!\n", num);
-            for (auto &streamInfoAllClient : streamInfoAllClients) {
-                if (streamInfoAllClient.webSocketClientId == num) {
+            for (auto &streamInfoAllClient : streamInfoAllClients)
+            {
+                if (streamInfoAllClient.webSocketClientId == num)
+                {
                     streamInfoAllClient.isActive = false;
-                    streamInfoAllClient.webSocketClientId = 0xFF;
+                    streamInfoAllClient.isPilot = false;
+                    streamInfoAllClient.webSocketClientId = invalidWebSocketId;
                     break;
                 }
             }
             break;
 
             // New client has connected
-        case WStype_CONNECTED: {
+        case WStype_CONNECTED:
+        {
             IPAddress ip = webSocket.remoteIP(num);
             Serial.printf("[%u] Connection from ", num);
             Serial.println(ip.toString());
-            for (auto &streamInfoAllClient : streamInfoAllClients) {
-                if (not streamInfoAllClient.isActive) {
+            for (auto &streamInfoAllClient : streamInfoAllClients)
+            {
+                if (not streamInfoAllClient.isActive)
+                {
                     streamInfoAllClient.isActive = true;
                     streamInfoAllClient.webSocketClientId = num;
                     break;
@@ -310,8 +384,44 @@ void onWebSocketEvent(uint8_t num,
             break;
 
             // Echo text message back to client
-        case WStype_TEXT: {
+        case WStype_TEXT:
+        {
             Serial.printf("[%u] Text: %s\n", num, payload);
+            if (payload[0] == '{')
+            {
+                // check if json command was received
+                StaticJsonDocument<200> doc;
+                deserializeJson(doc, payload);
+
+                if (doc.containsKey("pilot"))
+                {
+                    if (doc["pilot"] == 1)
+                    {
+                        bool isThereAPilot{false};
+                        for (const auto &streamInfoAllClient : streamInfoAllClients)
+                        {
+                            if (streamInfoAllClient.isPilot)
+                            {
+                                isThereAPilot = true;
+                                break;
+                            }
+                        }
+                        if (not isThereAPilot)
+                        {
+                            const uint8_t index{getIndexBywebsocketId(num)};
+                            streamInfoAllClients[index].isPilot = true;
+                            streamInfoAllClients[index].isPilotInformed = false;
+                            Serial.printf("ID %d, index %d is now pilot!\n", num, getIndexBywebsocketId(num));
+                        }
+                    } else
+                    {
+                        const uint8_t index{getIndexBywebsocketId(num)};
+                        streamInfoAllClients[index].isPilot = false;
+                        streamInfoAllClients[index].isPilotInformed = false;
+                        Serial.printf("ID %d, index %d is now spectator\n", num, getIndexBywebsocketId(num));
+                    }
+                }
+            }
         }
             break;
 
@@ -321,24 +431,29 @@ void onWebSocketEvent(uint8_t num,
         case WStype_FRAGMENT_BIN_START:
         case WStype_FRAGMENT:
         case WStype_FRAGMENT_FIN:
+        case WStype_PING:
+        case WStype_PONG:
         default:
             break;
     }
 }
 
 // ==== SETUP method ==================================================================
-void setup() {
+void setup()
+{
     // Setup Serial connection:
     Serial.begin(115200);
     delay(1000); // wait for a second to let Serial connect
 
     camera_init();
 
-    for (const auto &wifiLogin : wifiLogins) {
+    for (const auto &wifiLogin : wifiLogins)
+    {
         wiFiMulti.addAP(wifiLogin.ssid, wifiLogin.password);
     }
 
-    while (wiFiMulti.run() != WL_CONNECTED) {
+    while (wiFiMulti.run() != WL_CONNECTED)
+    {
         Serial.print(".");
         delay(500);
     }
@@ -364,7 +479,8 @@ void setup() {
             APP_CPU);
 }
 
-void loop() {
+void loop()
+{
     // this seems to be necessary to let IDLE task run and do GC
     vTaskDelay(1000);
 }
