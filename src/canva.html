@@ -67,185 +67,221 @@
 
 <body scroll="no" style="overflow: hidden; height:100vh;">
 
-<script>
-    //---------------- camera stuff-------------------------
+<div class="sidenav" id="navTop" style="position:relative;">
+    <a id="temp" style="padding-left: 3%;">0&#176C </a>
+    <a id="volt" style="padding-right: 3%;">0V</a>
+    <script>
+        //---------------- camera stuff-------------------------
 
-    const r = 0;
-    const capturecount = 1;
-    const gcanvasid = "canvas-QQ-VGA";
+        const r = 0;
+        const capturecount = 1;
+        const gcanvasid = "canvas-QQ-VGA";
 
-    //-----------------------------------------------------
+        //-----------------------------------------------------
 
 
-    host = window.location.hostname;
-    if (!host) host = '192.168.4.1'; //For debugging only
-    const ipaddr = host + ":81"; // websock port of ESP32, normally xx.xx.xx.xx:81
-    const websock = new WebSocket('ws://' + ipaddr);
-    websock.binaryType = 'arraybuffer';
-    websock.onopen = function (evt) {
-        console.log('websock open');
-        websock.send(gcanvasid); // initiate stream
-        console.log("Sending: " + gcanvasid);
-    };
+        host = window.location.hostname;
+        if (!host) host = '192.168.4.1'; //For debugging only
+        const ipaddr = host + ":81"; // websock port of ESP32, normally xx.xx.xx.xx:81
+        const websock = new WebSocket('ws://' + ipaddr);
+        websock.binaryType = 'arraybuffer';
+        websock.onopen = function (evt) {
+            console.log('websock open');
+            websock.send(gcanvasid); // initiate stream
+            console.log("Sending: " + gcanvasid);
+        };
 
-    websock.onclose = function (evt) {
-        console.log('websock close');
-        toStatus('websock close');
-    };
+        websock.onclose = function (evt) {
+            console.log('websock close');
+            toStatus('websock close');
+        };
 
-    websock.onerror = function (evt) {
-        console.log(evt);
-        toStatus(evt)
-    };
+        websock.onerror = function (evt) {
+            console.log(evt);
+            toStatus(evt)
+        };
 
-    function toStatus(txt) {
-        document.getElementById('status').innerHTML = txt;
-    }
-
-    const Vector2 = function (x, y) {
-        this.x = x || 0;
-        this.y = y || 0;
-    };
-
-    Vector2.prototype = {
-
-        reset: function (x, y) {
-
-            this.x = x;
-            this.y = y;
-            return this;
-        },
-
-        copyFrom: function (v) {
-            this.x = v.x;
-            this.y = v.y;
-        },
-
-        plusEq: function (v) {
-            this.x += v.x;
-            this.y += v.y;
-            return this;
-        },
-
-        minusEq: function (v) {
-            this.x -= v.x;
-            this.y -= v.y;
-            return this;
-        },
-
-        equals: function (v) {
-            return ((this.x == v.x) && (this.y == v.x));
+        function toStatus(txt) {
+            // document.getElementById('status').innerHTML = txt;
+            console.log(txt);
         }
 
-    };
+        const Vector2 = function (x, y) {
+            this.x = x || 0;
+            this.y = y || 0;
+        };
 
-    var canvas,
-        scanvas,
-        c, // c is the canvas' context 2D
-        container,
-        halfWidth,
-        halfHeight,
-        leftTouchID = -1,
-        leftTouchPos = new Vector2(0, 0),
-        leftTouchStartPos = new Vector2(0, 0),
-        leftVector = new Vector2(0, 0);
+        Vector2.prototype = {
 
-    var temperature;
-    var sendFlag = false;
+            reset: function (x, y) {
 
-    setupCanvas();
+                this.x = x;
+                this.y = y;
+                return this;
+            },
 
-    var mouseX,
-        mouseY,
-        mouseDown = false,
-        touches = []; // array of touch vectors;
+            copyFrom: function (v) {
+                this.x = v.x;
+                this.y = v.y;
+            },
 
-    let headlight = 0;
+            plusEq: function (v) {
+                this.x += v.x;
+                this.y += v.y;
+                return this;
+            },
 
-    setInterval(draw, 1000 / 30); // draw app at 30fps
+            minusEq: function (v) {
+                this.x -= v.x;
+                this.y -= v.y;
+                return this;
+            },
 
-    setInterval(sendControls, 1000 / 10); // send control input at 10fps
+            equals: function (v) {
+                return ((this.x == v.x) && (this.y == v.x));
+            }
+
+        };
+
+        var canvas,
+            scanvas,
+            c, // c is the canvas' context 2D
+            container,
+            halfWidth,
+            halfHeight,
+            leftTouchID = -1,
+            leftTouchPos = new Vector2(0, 0),
+            leftTouchStartPos = new Vector2(0, 0),
+            leftVector = new Vector2(0, 0);
+
+        var temperature;
+        var sendFlag = false;
+
+        setupCanvas();
+
+        var mouseX,
+            mouseY,
+            mouseDown = false,
+            touches = []; // array of touch vectors;
+
+        let headlight = 0;
+
+        setInterval(draw, 1000 / 30); // draw app at 30fps
+
+        setInterval(sendControls, 1000 / 10); // send control input at 10fps
 
 
-    canvas.addEventListener('touchstart', onTouchStart, false);
-    canvas.addEventListener('touchmove', onTouchMove, false);
-    canvas.addEventListener('touchend', onTouchEnd, false);
-    window.onorientationchange = resetCanvas;
-    window.onresize = resetCanvas;
+        canvas.addEventListener('touchstart', onTouchStart, false);
+        canvas.addEventListener('touchmove', onTouchMove, false);
+        canvas.addEventListener('touchend', onTouchEnd, false);
+        window.onorientationchange = resetCanvas;
+        window.onresize = resetCanvas;
 
 
-    canvas.addEventListener('mousemove', onMouseMove, false);
-    canvas.addEventListener('mousedown', onMouseDown, false);
-    canvas.addEventListener('mouseup', onMouseUp, false);
+        canvas.addEventListener('mousemove', onMouseMove, false);
+        canvas.addEventListener('mousedown', onMouseDown, false);
+        canvas.addEventListener('mouseup', onMouseUp, false);
 
 
-    function resetCanvas(e) {
-        // resize the canvas - but remember - this clears the canvas too.
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        function resetCanvas(e) {
+            // resize the canvas - but remember - this clears the canvas too.
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
 
-        //halfWidth = canvas.width/2;
-        halfWidth = canvas.width;
+            //halfWidth = canvas.width/2;
+            halfWidth = canvas.width;
 
-        halfHeight = canvas.height / 2;
+            halfHeight = canvas.height / 2;
 
-        //make sure we scroll to the top left.
-        window.scrollTo(0, 0);
-    }
-
-    let rawLeft, rawRight, MaxJoy = 255, MinJoy = -255, MaxValue = 255,
-        MinValue = -255, RawLeft, RawRight, ValLeft, ValRight;
-    let leftMot = 0, rightMot = 0;
-
-    function Remap(value, from1, to1, from2, to2) {
-        return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
-    }
-
-    //source: http://www.dyadica.co.uk/basic-differential-aka-tank-drive/
-    function tankDrive(x, y) {
-
-        const z = Math.sqrt(x * x + y * y);
-        let rad = Math.acos(Math.abs(x) / z);
-
-        if (isNaN(rad)) rad = 0;
-        const angle = rad * 180 / Math.PI;
-        const tcoeff = -1 + (angle / 90) * 2;
-        let turn = tcoeff * Math.abs(Math.abs(y) - Math.abs(x));
-
-        turn = Math.round(turn * 100) / 100;
-        const move = Math.max(Math.abs(y), Math.abs(x));
-
-        if ((x >= 0 && y >= 0) || (x < 0 && y < 0)) {
-            rawLeft = move;
-            rawRight = turn;
-        } else {
-            rawRight = move;
-            rawLeft = turn;
+            //make sure we scroll to the top left.
+            window.scrollTo(0, 0);
         }
 
-        if (y < 0) {
-            rawLeft = 0 - rawLeft;
-            rawRight = 0 - rawRight;
+        let rawLeft, rawRight, MaxJoy = 255, MinJoy = -255, MaxValue = 255,
+            MinValue = -255, RawLeft, RawRight, ValLeft, ValRight;
+        let leftMot = 0, rightMot = 0;
+
+        function Remap(value, from1, to1, from2, to2) {
+            return (value - from1) / (to1 - from1) * (to2 - from2) + from2;
         }
 
-        RawLeft = rawLeft;
-        RawRight = rawRight;
+        //source: http://www.dyadica.co.uk/basic-differential-aka-tank-drive/
+        function tankDrive(x, y) {
 
-        leftMot = Remap(rawLeft, MinJoy, MaxJoy, MinValue, MaxValue);
-        rightMot = Remap(rawRight, MinJoy, MaxJoy, MinValue, MaxValue);
-    }
+            const z = Math.sqrt(x * x + y * y);
+            let rad = Math.acos(Math.abs(x) / z);
+
+            if (isNaN(rad)) rad = 0;
+            const angle = rad * 180 / Math.PI;
+            const tcoeff = -1 + (angle / 90) * 2;
+            let turn = tcoeff * Math.abs(Math.abs(y) - Math.abs(x));
+
+            turn = Math.round(turn * 100) / 100;
+            const move = Math.max(Math.abs(y), Math.abs(x));
+
+            if ((x >= 0 && y >= 0) || (x < 0 && y < 0)) {
+                rawLeft = move;
+                rawRight = turn;
+            } else {
+                rawRight = move;
+                rawLeft = turn;
+            }
+
+            if (y < 0) {
+                rawLeft = 0 - rawLeft;
+                rawRight = 0 - rawRight;
+            }
+
+            RawLeft = rawLeft;
+            RawRight = rawRight;
+
+            leftMot = Remap(rawLeft, MinJoy, MaxJoy, MinValue, MaxValue);
+            rightMot = Remap(rawRight, MinJoy, MaxJoy, MinValue, MaxValue);
+        }
 
 
-    function draw() {
+        function draw() {
 
-        c.clearRect(0, 0, canvas.width, canvas.height);
+            c.clearRect(0, 0, canvas.width, canvas.height);
 
-        //if touch
-        for (let i = 0; i < touches.length; i++) {
+            //if touch
+            for (let i = 0; i < touches.length; i++) {
 
-            const touch = touches[i];
+                const touch = touches[i];
 
-            if (touch.identifier == leftTouchID) {
+                if (touch.identifier == leftTouchID) {
+                    c.beginPath();
+                    c.strokeStyle = "white";
+                    c.lineWidth = 6;
+                    c.arc(leftTouchStartPos.x, leftTouchStartPos.y, 40, 0, Math.PI * 2, true);
+                    c.stroke();
+                    c.beginPath();
+                    c.strokeStyle = "white";
+                    c.lineWidth = 2;
+                    c.arc(leftTouchStartPos.x, leftTouchStartPos.y, 60, 0, Math.PI * 2, true);
+                    c.stroke();
+                    c.beginPath();
+                    c.strokeStyle = "white";
+                    c.arc(leftTouchPos.x, leftTouchPos.y, 40, 0, Math.PI * 2, true);
+                    c.stroke();
+
+                } else {
+
+                    c.beginPath();
+                    c.fillStyle = "white";
+                    //c.fillText("touch id : "+touch.identifier+" x:"+touch.clientX+" y:"+touch.clientY, touch.clientX+30, touch.clientY-30);
+
+                    c.beginPath();
+                    c.strokeStyle = "red";
+                    c.lineWidth = "6";
+                    c.arc(touch.clientX, touch.clientY, 40, 0, Math.PI * 2, true);
+                    c.stroke();
+                }
+            }
+
+            //if not touch
+            if (mouseDown) {
+
                 c.beginPath();
                 c.strokeStyle = "white";
                 c.lineWidth = 6;
@@ -261,291 +297,267 @@
                 c.arc(leftTouchPos.x, leftTouchPos.y, 40, 0, Math.PI * 2, true);
                 c.stroke();
 
-            } else {
-
-                c.beginPath();
                 c.fillStyle = "white";
-                //c.fillText("touch id : "+touch.identifier+" x:"+touch.clientX+" y:"+touch.clientY, touch.clientX+30, touch.clientY-30);
-
+                //c.fillText("mouse : "+mouseX+", "+mouseY, mouseX, mouseY);
                 c.beginPath();
-                c.strokeStyle = "red";
+                c.strokeStyle = "white";
                 c.lineWidth = "6";
-                c.arc(touch.clientX, touch.clientY, 40, 0, Math.PI * 2, true);
+                c.arc(mouseX, mouseY, 40, 0, Math.PI * 2, true);
                 c.stroke();
             }
+
+
+            //c.fillText("Left Motor: " + leftMot + " Right Motor: " + rightMot, 10, 30);
+            //c.fillText("Left Vx: " + leftVector.x + " Left Vy: " + leftVector.y, 10, 50);
+            //c.fillText("Temperature: "+temperature+"&#176C", 10, 30);
         }
 
-        //if not touch
-        if (mouseDown) {
+        websock.onmessage = function (event) {
+            // console.log('Data received: ' + event.data);
+            // console.log(typeof event.data);
 
-            c.beginPath();
-            c.strokeStyle = "white";
-            c.lineWidth = 6;
-            c.arc(leftTouchStartPos.x, leftTouchStartPos.y, 40, 0, Math.PI * 2, true);
-            c.stroke();
-            c.beginPath();
-            c.strokeStyle = "white";
-            c.lineWidth = 2;
-            c.arc(leftTouchStartPos.x, leftTouchStartPos.y, 60, 0, Math.PI * 2, true);
-            c.stroke();
-            c.beginPath();
-            c.strokeStyle = "white";
-            c.arc(leftTouchPos.x, leftTouchPos.y, 40, 0, Math.PI * 2, true);
-            c.stroke();
-
-            c.fillStyle = "white";
-            //c.fillText("mouse : "+mouseX+", "+mouseY, mouseX, mouseY);
-            c.beginPath();
-            c.strokeStyle = "white";
-            c.lineWidth = "6";
-            c.arc(mouseX, mouseY, 40, 0, Math.PI * 2, true);
-            c.stroke();
-        }
-
-
-        //c.fillText("Left Motor: " + leftMot + " Right Motor: " + rightMot, 10, 30);
-        //c.fillText("Left Vx: " + leftVector.x + " Left Vy: " + leftVector.y, 10, 50);
-        //c.fillText("Temperature: "+temperature+"&#176C", 10, 30);
-    }
-
-    websock.onmessage = function (event) {
-        console.log('Data received: ' + event.data);
-        // console.log(typeof event.data);
-
-        let voltage;
-        if (typeof event.data === 'string') {
-            const msgReceived = JSON.parse(event.data);
-            console.log(msgReceived);
-            if (msgReceived.hasOwnProperty('temp')) {
-                temperature = parseInt(msgReceived.temp);
-                document.getElementById("temp").innerHTML = temperature + '&#176C';
-            }
-            if (msgReceived.hasOwnProperty('volt')) {
-                voltage = parseFloat(msgReceived.volt).toFixed(2);
-                document.getElementById("volt").innerHTML = voltage + 'V';
-            }
-        } else {
-            console.log('New image received');
-            const pixels = new Uint8Array(event.data);
-
-            const blob = new Blob(
-                [pixels],
-                {type: 'image/png'}
-            );
-
-            document.getElementById("imgStream").src = URL.createObjectURL(blob);
-        }
-    }
-
-
-    window.addEventListener('resize', resizeStream, false);
-
-    function resizeStream() {
-        const aspectRatio = 160 / 120;
-        const maxHeight = window.innerHeight - document.getElementById('navTop').offsetHeight - document.getElementById('navBottom').offsetHeight;
-        if (window.innerWidth * aspectRatio <= maxHeight) {
-            document.getElementById('imgStream').style.height = window.innerWidth * aspectRatio + "px";
-            document.getElementById('imgStream').style.width = window.innerWidth + "px";
-        } else {
-            document.getElementById('imgStream').style.height = maxHeight + "px";
-            document.getElementById('imgStream').style.width = maxHeight / aspectRatio + "px";
-        }
-    }
-
-    /*
-    * Touch event
-    */
-
-    function onTouchStart(e) {
-
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            //console.log(leftTouchID + " "
-            if ((leftTouchID < 0) && (touch.clientX < halfWidth)) {
-
-                leftTouchID = touch.identifier;
-                leftTouchStartPos.reset(touch.clientX, touch.clientY);
-                leftTouchPos.copyFrom(leftTouchStartPos);
-                leftVector.reset(0, 0);
-
+            let voltage;
+            if (typeof event.data === 'string') {
+                const msgReceived = JSON.parse(event.data);
+                console.log(msgReceived);
+                if (msgReceived.hasOwnProperty('temp')) {
+                    temperature = parseInt(msgReceived.temp);
+                    document.getElementById("temp").innerHTML = temperature + '&#176C';
+                }
+                if (msgReceived.hasOwnProperty('volt')) {
+                    voltage = parseFloat(msgReceived.volt).toFixed(2);
+                    document.getElementById("volt").innerHTML = voltage + 'V';
+                }
             } else {
+                console.log('New image received');
+                const pixels = new Uint8Array(event.data);
 
-                makeBullet();
+                const blob = new Blob(
+                    [pixels],
+                    {type: 'image/png'}
+                );
+
+                document.getElementById("imgStream").src = URL.createObjectURL(blob);
             }
         }
-        touches = e.touches;
-    }
 
-    function onMouseDown(event) {
-        leftTouchStartPos.reset(event.offsetX, event.offsetY);
-        leftTouchPos.copyFrom(leftTouchStartPos);
-        leftVector.reset(0, 0);
-        mouseDown = true;
-    }
 
-    function onTouchMove(e) {
-        // Prevent the browser from doing its default thing (scroll, zoom)
-        e.preventDefault();
+        window.addEventListener('resize', resizeStream, false);
 
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            if (leftTouchID == touch.identifier) {
-                leftTouchPos.reset(touch.clientX, touch.clientY);
+        function resizeStream() {
+            const img = document.getElementById("imgStream");
+            const ratio = Math.round(320/240);
+
+            if (canvas.clientWidth < canvas.clientHeight) {
+                img.style.width = canvas.clientWidth + "px";
+                img.style.height = canvas.clientWidth * ratio + "px";
+
+                console.log("resize with max width canvas(" + canvas.clientWidth + "," + canvas.clientHeight + ") " +
+                    "img " + img.style.width + "," + img.style.height + ") ratio:" + ratio);
+            } else {
+                img.style.width = canvas.clientHeight / ratio + "px";
+                img.style.height = canvas.clientHeight + "px";
+
+                console.log("resize with max height canvas(" + canvas.clientWidth + "," + canvas.clientHeight + ") " +
+                    "img " + img.style.width + "," + img.style.height + ") ratio:" + ratio);
+            }
+        }
+
+        /*
+        * Touch event
+        */
+
+        function onTouchStart(e) {
+
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                //console.log(leftTouchID + " "
+                if ((leftTouchID < 0) && (touch.clientX < halfWidth)) {
+
+                    leftTouchID = touch.identifier;
+                    leftTouchStartPos.reset(touch.clientX, touch.clientY);
+                    leftTouchPos.copyFrom(leftTouchStartPos);
+                    leftVector.reset(0, 0);
+
+                } else {
+
+                    makeBullet();
+                }
+            }
+            touches = e.touches;
+        }
+
+        function onMouseDown(event) {
+            leftTouchStartPos.reset(event.offsetX, event.offsetY);
+            leftTouchPos.copyFrom(leftTouchStartPos);
+            leftVector.reset(0, 0);
+            mouseDown = true;
+        }
+
+        function onTouchMove(e) {
+            // Prevent the browser from doing its default thing (scroll, zoom)
+            e.preventDefault();
+
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (leftTouchID == touch.identifier) {
+                    leftTouchPos.reset(touch.clientX, touch.clientY);
+                    leftVector.copyFrom(leftTouchPos);
+                    leftVector.minusEq(leftTouchStartPos);
+                    sendFlag = true;
+                    break;
+                }
+            }
+
+            touches = e.touches;
+
+        }
+
+        function onMouseMove(event) {
+
+            mouseX = event.offsetX;
+            mouseY = event.offsetY;
+            if (mouseDown) {
+                leftTouchPos.reset(event.offsetX, event.offsetY);
                 leftVector.copyFrom(leftTouchPos);
                 leftVector.minusEq(leftTouchStartPos);
                 sendFlag = true;
-                break;
             }
+
         }
 
-        touches = e.touches;
+        function onTouchEnd(e) {
 
-    }
+            touches = e.touches;
 
-    function onMouseMove(event) {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (leftTouchID == touch.identifier) {
+                    leftTouchID = -1;
+                    leftVector.reset(0, 0);
+                    leftMot = rightMot = 0;
+                    sendFlag = true;
+                    break;
+                }
+            }
 
-        mouseX = event.offsetX;
-        mouseY = event.offsetY;
-        if (mouseDown) {
-            leftTouchPos.reset(event.offsetX, event.offsetY);
-            leftVector.copyFrom(leftTouchPos);
-            leftVector.minusEq(leftTouchStartPos);
+        }
+
+        function onMouseUp(event) {
+
+            leftVector.reset(0, 0);
+            leftMot = rightMot = 0;
+            mouseDown = false;
             sendFlag = true;
         }
 
-    }
+        /*
+        Source for keyboard detection: Braden Best:
+        https://stackoverflow.com/questions/5203407/how-to-detect-if-multiple-keys-are-pressed-at-once-using-javascript
+        */
+        const map = {};
+        onkeydown = onkeyup = function (e) {
+            e = e || event; // to deal with IE
+            map[e.keyCode] = e.type == 'keydown';
 
-    function onTouchEnd(e) {
+            if (map[38]) { // ArrowUp
+                leftVector.y = -55;
+            }
+            if (map[40]) { // ArrowDown
+                leftVector.y = 55;
+            }
+            if (map[37]) { // ArrowLeft
+                leftVector.x = -55;
+            }
+            if (map[39]) { // ArrowRight
+                leftVector.x = 55;
+            }
 
-        touches = e.touches;
+            if (!map[38] && !map[40]) { // ArrowUp/Down is not pressed
+                leftVector.y = 0;
+            }
+            if (!map[37] && !map[39]) { // ArrowLeft/Right is not pressed
+                leftVector.x = 0;
+            }
+            if (leftVector.y == 0 && leftVector.x == 0) leftMot = rightMot = 0;
+            sendFlag = true;
+        }
 
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            if (leftTouchID == touch.identifier) {
-                leftTouchID = -1;
-                leftVector.reset(0, 0);
-                leftMot = rightMot = 0;
-                sendFlag = true;
-                break;
+        function setupCanvas() {
+
+            canvas = document.createElement('canvas');
+            c = canvas.getContext('2d');
+            canvas.id = "canvas";
+            container = document.createElement('div');
+            container.className = "container";
+            container.id = "container";
+
+            document.body.appendChild(container);
+            container.appendChild(canvas);
+
+            resetCanvas();
+
+            c.strokeStyle = "#ffffff";
+            c.lineWidth = 2;
+        }
+
+        function mouseOver(minX, minY, maxX, maxY) {
+            return (mouseX > minX && mouseY > minY && mouseX < maxX && mouseY < maxY);
+        }
+
+        function sendControls() {
+            if (sendFlag == true) {
+                leftVector.x = Math.min(Math.max(parseInt(leftVector.x), -255), 255);
+                leftVector.y = Math.min(Math.max(parseInt(leftVector.y), -255), 255);
+
+                tankDrive(leftVector.x, -leftVector.y);
+                if (leftMot > 0) leftMot += 70;
+                if (leftMot < 0) leftMot -= 70;
+                if (rightMot > 0) rightMot += 70;
+                if (rightMot < 0) rightMot -= 70;
+                leftMot = Math.min(Math.max(parseInt(leftMot), -255), 255);
+                rightMot = Math.min(Math.max(parseInt(rightMot), -255), 255);
+
+                websock.send(JSON.stringify({cmd: "pos", val: leftMot, val2: rightMot}));
+                sendFlag = false;
             }
         }
 
-    }
 
-    function onMouseUp(event) {
-
-        leftVector.reset(0, 0);
-        leftMot = rightMot = 0;
-        mouseDown = false;
-        sendFlag = true;
-    }
-
-    /*
-    Source for keyboard detection: Braden Best:
-    https://stackoverflow.com/questions/5203407/how-to-detect-if-multiple-keys-are-pressed-at-once-using-javascript
-    */
-    const map = {};
-    onkeydown = onkeyup = function (e) {
-        e = e || event; // to deal with IE
-        map[e.keyCode] = e.type == 'keydown';
-
-        if (map[38]) { // ArrowUp
-            leftVector.y = -55;
-        }
-        if (map[40]) { // ArrowDown
-            leftVector.y = 55;
-        }
-        if (map[37]) { // ArrowLeft
-            leftVector.x = -55;
-        }
-        if (map[39]) { // ArrowRight
-            leftVector.x = 55;
+        takePicture = function (el) {
+            //websock.send(JSON.stringify({ cmd : "cam", val : 1 }));
+            const canvas = document.getElementById("imgStream");
+            const image = canvas.toDataURL("image/jpg");
+            el.href = image;
         }
 
-        if (!map[38] && !map[40]) { // ArrowUp/Down is not pressed
-            leftVector.y = 0;
+        function shutdown() {
+            if (confirm("This will shutdown the your car.\nAre you sure?")) {
+                websock.send(JSON.stringify({cmd: "power", val: 1}));
+            }
         }
-        if (!map[37] && !map[39]) { // ArrowLeft/Right is not pressed
-            leftVector.x = 0;
+
+        // Handle headlight button
+        function handleHeadlightClick(cb) {
+            if (headlight == 0) {
+                headlight = 1;
+                document.getElementById("light").style.backgroundColor = "gray";
+            } else {
+                headlight = 0;
+                document.getElementById("light").style.backgroundColor = "black";
+
+            }
+            websock.send(JSON.stringify({cmd: "light", val: headlight}));
         }
-        if (leftVector.y == 0 && leftVector.x == 0) leftMot = rightMot = 0;
-        sendFlag = true;
-    }
-
-    function setupCanvas() {
-
-        canvas = document.createElement('canvas');
-        c = canvas.getContext('2d');
-        container = document.createElement('div');
-        container.className = "container";
-
-        document.body.appendChild(container);
-        container.appendChild(canvas);
-
-        resetCanvas();
-
-        c.strokeStyle = "#ffffff";
-        c.lineWidth = 2;
-    }
-
-    function mouseOver(minX, minY, maxX, maxY) {
-        return (mouseX > minX && mouseY > minY && mouseX < maxX && mouseY < maxY);
-    }
-
-    function sendControls() {
-        if (sendFlag == true) {
-            leftVector.x = Math.min(Math.max(parseInt(leftVector.x), -255), 255);
-            leftVector.y = Math.min(Math.max(parseInt(leftVector.y), -255), 255);
-
-            tankDrive(leftVector.x, -leftVector.y);
-            if (leftMot > 0) leftMot += 70;
-            if (leftMot < 0) leftMot -= 70;
-            if (rightMot > 0) rightMot += 70;
-            if (rightMot < 0) rightMot -= 70;
-            leftMot = Math.min(Math.max(parseInt(leftMot), -255), 255);
-            rightMot = Math.min(Math.max(parseInt(rightMot), -255), 255);
-
-            websock.send(JSON.stringify({cmd: "pos", val: leftMot, val2: rightMot}));
-            sendFlag = false;
-        }
-    }
 
 
-    takePicture = function (el) {
-        //websock.send(JSON.stringify({ cmd : "cam", val : 1 }));
-        const canvas = document.getElementById("imgStream");
-        const image = canvas.toDataURL("image/jpg");
-        el.href = image;
-    }
-
-    function shutdown() {
-        if (confirm("This will shutdown the your car.\nAre you sure?")) {
-            websock.send(JSON.stringify({cmd: "power", val: 1}));
-        }
-    }
-
-    // Handle headlight button
-    function handleHeadlightClick(cb) {
-        if (headlight == 0) {
-            headlight = 1;
-            document.getElementById("light").style.backgroundColor = "gray";
-        } else {
-            headlight = 0;
-            document.getElementById("light").style.backgroundColor = "black";
-
-        }
-        websock.send(JSON.stringify({cmd: "light", val: headlight}));
-    }
-
-
-</script>
-<div class="sidenav" id="navTop" style="position:relative;">
-    <a id="temp" style="padding-left: 3%;">0&#176C </a>
-    <a id="volt" style="padding-right: 3%;">0V</a>
+    </script>
 </div>
 
 <div style="position:relative;z-index:0;">
-    <img alt="" height="160" id="imgStream" src="" >
+    <img alt="" id="imgStream" src=""
+         style="width: 160px;height: 120px; -ms-transform: rotate(180deg);-webkit-transform: rotate(180deg);transform: rotate(180deg);"
+         width="100%">
 </div>
 
 <div class="sidenav" id="navBottom" style="bottom:0;z-index: 2;">
@@ -556,7 +568,6 @@
     <a class="button light" id="light" onclick="handleHeadlightClick()" style="transition: background 0.4s;"
        type="button">LIGHT</a>
 </div>
-
 <script>resizeStream();</script>
 </body>
 </html>
