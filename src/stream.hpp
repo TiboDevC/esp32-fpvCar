@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include "memoryAllocation.hpp"
+#include "imageParams.hpp"
 
 
 static constexpr uint8_t invalidWebSocketId{0xFF};
@@ -25,7 +26,7 @@ std::vector<StreamInfo> streamInfoAllClients;
 class StreamOverWebsocket
 {
 public:
-    void streamImgToAllClients(const uint16_t &camSize, uint8_t *camBuf);
+    void streamImgToAllClients(Frame *frame);
 
     void voidSendText(char *stringToSend, const uint8_t &webSocketClientId)
     {
@@ -40,20 +41,18 @@ public:
         webSocket.onEvent(onWebSocketEvent);
     }
 
-    const WebSocketsServer &getWebSocket() const
-    {
-        return webSocket;
-    }
-
     void checkMessageArrival()
     {
         webSocket.loop();
     }
 
 private:
-    uint8_t *bufferToSend = {NULL};
-    size_t bufferToSendSize = {0};
     WebSocketsServer webSocket{81};
+
+    TickType_t xFrequency{pdMS_TO_TICKS(1000 / 5)};
+
+    uint8_t *camBuf{};
+    size_t camSize{};
 
     static uint8_t getIndexBywebsocketId(const uint8_t &webSocketClientId);
 
@@ -64,12 +63,12 @@ private:
                                  size_t length);
 };
 
-void StreamOverWebsocket::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
+void StreamOverWebsocket::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+{
 
     // Figure out the type of WebSocket event
     switch (type)
     {
-
         // Client has disconnected
         case WStype_DISCONNECTED:
             Serial.printf("[%u] Disconnected!\n", num);
@@ -138,7 +137,8 @@ void StreamOverWebsocket::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *
     }
 }
 
-uint8_t StreamOverWebsocket::getIndexBywebsocketId(const uint8_t &webSocketClientId) {
+uint8_t StreamOverWebsocket::getIndexBywebsocketId(const uint8_t &webSocketClientId)
+{
     for (const auto &streamInfoAllClient : streamInfoAllClients)
     {
         if (webSocketClientId == streamInfoAllClient.webSocketClientId)
@@ -149,28 +149,24 @@ uint8_t StreamOverWebsocket::getIndexBywebsocketId(const uint8_t &webSocketClien
     return invalidWebSocketId;
 }
 
-void StreamOverWebsocket::streamImgToAllClients(const uint16_t &camSize, uint8_t *camBuf) {
-    if (bufferToSend == NULL && camSize > 0)
+void StreamOverWebsocket::streamImgToAllClients(Frame *frame)
+{
+    if (frame->buffSize > 0 and not streamInfoAllClients.empty())
     {
-        bufferToSend = allocateMemory(bufferToSend, camSize);
-        bufferToSendSize = camSize;
-    } else
-    {
-        if (camSize > bufferToSendSize)
+        xSemaphoreTake(frame->frameSync, xFrequency);
+        if (frame->buffSize > camSize)
         {
-            bufferToSend = allocateMemory(bufferToSend, camSize);
-            bufferToSendSize = camSize;
+            Serial.println("Allocate camBuf in stream");
+            camSize = frame->buffSize;
+            camBuf = allocateMemory(camBuf, camSize);
         }
-    }
-    memcpy(bufferToSend, (const void *) camBuf, bufferToSendSize);
+        memcpy(camBuf, frame->buffToSend, camSize);
+        xSemaphoreGive(frame->frameSync);
 
-    for (const auto &webSocketClientId : streamInfoAllClients)
-    {
-        const bool successSend = webSocket.sendBIN(webSocketClientId.webSocketClientId, bufferToSend,
-                                                   bufferToSendSize);
-        if (not successSend)
+        for (const auto &webSocketClientId : streamInfoAllClients)
         {
-            Serial.printf("Unsuccess sending to %d\n", webSocketClientId.webSocketClientId);
+
+            webSocket.sendBIN(webSocketClientId.webSocketClientId, camBuf, camSize);
         }
     }
 }

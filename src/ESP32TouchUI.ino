@@ -12,6 +12,7 @@
 
 #include "stream.hpp"
 #include "camera.hpp"
+#include "imageParams.hpp"
 
 #include "../private/wifiLogin.h"
 // creat a new wifiLogin.h in your project:
@@ -27,17 +28,12 @@
 //                       {"ssid2", "password2"},
 //                       {"ssid3", "password3"}};
 
+
 WebServer wifiServer(80);
 WiFiMulti wiFiMulti;
-constexpr uint8_t maxClients{10};
-constexpr uint8_t FPS{50};
-
-// Current frame information
-volatile size_t camSize{};    // size of the current frame, byte
-volatile uint8_t *camBuf;      // pointer to the current frame
 
 // ==== Handle connection request from clients ===============================
-void steamServerHtml(void)
+void steamServerHtml()
 {
     Serial.printf("new client, sending base of html page\n");
 
@@ -52,7 +48,7 @@ void steamServerHtml(void)
 
 
 // ==== Handle connection request from clients ===============================
-void handleNotFound(void)
+void handleNotFound()
 {
     auto client = wifiServer.client();
 
@@ -61,6 +57,18 @@ void handleNotFound(void)
     client.println();
     client.print("try another one!");
     client.println();
+}
+
+[[noreturn]] void captureProcess( void * parameter) {
+    Serial.println("Start captureProcess task");
+
+    auto* frame = static_cast<Frame*>(parameter);
+
+    Camera cameraTool{frame};
+
+    for(;;) {
+        cameraTool.captureImage();
+    }
 }
 
 // ==== SETUP method ==================================================================
@@ -95,15 +103,27 @@ void setup()
 
     Serial.printf("Web server started, open %s in a web browser\n", WiFi.localIP().toString().c_str());
 
-    Camera cameraTool{};
     StreamOverWebsocket streamOverWebsocket{};
+
+    Frame *frameState = new Frame;
+    frameState->buffSize = 2;
+
+    TaskHandle_t tCaptureImage;
+
+    xTaskCreatePinnedToCore(
+            captureProcess,     /* Function to implement the task */
+            "Task1",            /* Name of the task */
+            10000,              /* Stack size in words */
+            frameState,         /* Task input parameter */
+            2,                  /* Priority of the task */
+            &tCaptureImage,     /* Task handle. */
+            0);                 /* Core where the task should run */
 
     for (;;)
     {
         wifiServer.handleClient();
         streamOverWebsocket.checkMessageArrival();
-        cameraTool.captureImage();
-        streamOverWebsocket.streamImgToAllClients(cameraTool.getFSize(), cameraTool.getFbs());
+        streamOverWebsocket.streamImgToAllClients(frameState);
     }
 }
 
