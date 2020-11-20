@@ -106,7 +106,6 @@ void setup()
     StreamOverWebsocket streamOverWebsocket{};
 
     Frame *frameState = new Frame;
-    frameState->buffSize = 2;
 
     TaskHandle_t tCaptureImage;
 

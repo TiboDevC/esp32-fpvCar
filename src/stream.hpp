@@ -49,7 +49,8 @@ public:
 private:
     WebSocketsServer webSocket{81};
 
-    TickType_t xFrequency{pdMS_TO_TICKS(1000 / 5)};
+    static constexpr uint8_t waitingTimeBeforeSendAbort{50};
+    TickType_t xFrequency{pdMS_TO_TICKS(waitingTimeBeforeSendAbort)};
 
     uint8_t *camBuf{};
     size_t camSize{};
@@ -153,20 +154,16 @@ void StreamOverWebsocket::streamImgToAllClients(Frame *frame)
 {
     if (frame->buffSize > 0 and not streamInfoAllClients.empty())
     {
-        xSemaphoreTake(frame->frameSync, xFrequency);
-        if (frame->buffSize > camSize)
+        if (xSemaphoreTake(frame->frameSync, xFrequency))
         {
-            Serial.println("Allocate camBuf in stream");
-            camSize = frame->buffSize;
-            camBuf = allocateMemory(camBuf, camSize);
-        }
-        memcpy(camBuf, frame->buffToSend, camSize);
-        xSemaphoreGive(frame->frameSync);
-
-        for (const auto &webSocketClientId : streamInfoAllClients)
+            for (const auto &webSocketClientId : streamInfoAllClients)
+            {
+                webSocket.sendBIN(webSocketClientId.webSocketClientId, frame->buffToSend, frame->buffSize);
+            }
+            xSemaphoreGive(frame->frameSync);
+        } else
         {
-
-            webSocket.sendBIN(webSocketClientId.webSocketClientId, camBuf, camSize);
+            Serial.println("Err: fail taken semaphor streaming");
         }
     }
 }

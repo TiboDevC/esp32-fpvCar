@@ -23,8 +23,10 @@ public:
 
     void captureImage()
     {
+        bool doAllocateMemory{false};
         //  Grab a frame from the camera and query its size
         camera_fb_t *fb{nullptr};
+
 
         fb = esp_camera_fb_get();
         const size_t sizePicture = fb->len;
@@ -32,25 +34,31 @@ public:
         //  If frame size is more that we have previously allocated - request  125% of the current frame space
         if (sizePicture > camSize[currentFrame])
         {
-            camSize[currentFrame] = sizePicture + sizePicture;
+            doAllocateMemory = true;
+            camSize[currentFrame] = sizePicture + sizePicture / 4;
             camBuf[currentFrame] = allocateMemory(camBuf[currentFrame], camSize[currentFrame]);
         }
 
         //  Copy current frame into local buffer
-        auto b = (uint8_t *) fb->buf;
-        memcpy(camBuf[currentFrame], b, sizePicture);
+        auto bufferPointer = (uint8_t *) fb->buf;
+        memcpy(camBuf[currentFrame], bufferPointer, sizePicture);
         esp_camera_fb_return(fb);
 
-        taskYIELD();
-        if (xSemaphoreTake(frame->frameSync, xFrequency))
+        if (xSemaphoreTake(frame->frameSync, waitingTicks))
         {
-            if(sizePicture > camSize[currentFrame])
+            if (doAllocateMemory)
             {
                 frame->buffToSend = allocateMemory(frame->buffToSend, camSize[currentFrame]);
             }
             frame->buffSize = sizePicture;
-            frame->buffToSend = camBuf[currentFrame];
+            memcpy(frame->buffToSend, camBuf[currentFrame], sizePicture);
             xSemaphoreGive(frame->frameSync);
+        }
+
+        currentFrame++;
+        if (currentFrame > (numberOfFrames - 1))
+        {
+            currentFrame = 0;
         }
         taskYIELD();
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -61,6 +69,7 @@ private:
     Frame *frame{};
     TickType_t xLastWakeTime;
     static constexpr uint8_t FPS{20};
+    static constexpr uint8_t waitingTicks{10}; // very short time, no need to block core0
     const TickType_t xFrequency{pdMS_TO_TICKS(1000 / FPS)};
 
     //  Pointers to the 2 frames, their respective sizes and index of the current frame
