@@ -5,14 +5,16 @@
 struct Frame
 {
     static constexpr uint8_t numberOfFrameSaved{2};
+
     Frame()
     {
-        for(uint8_t indexSemaphor{}; indexSemaphor < numberOfFrameSaved; indexSemaphor++)
+        for (auto &semaphore :frameSync)
         {
-            frameSync[indexSemaphor] = xSemaphoreCreateBinary();
-            xSemaphoreGive(frameSync[indexSemaphor]);
+            semaphore = xSemaphoreCreateBinary();
+            xSemaphoreGive(semaphore);
         }
     }
+
     SemaphoreHandle_t frameSync[numberOfFrameSaved]{};
 
     uint8_t bufferUpToDate{};

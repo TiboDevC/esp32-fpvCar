@@ -156,7 +156,8 @@ void StreamOverWebsocket::streamImgToAllClients(Frame *frame)
         {
             bufferUpToDate++;
             bufferUpToDate %= Frame::numberOfFrameSaved;
-            if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], xFrequency) or frame->frameSize[bufferUpToDate] == 0)
+            if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], xFrequency) or
+                frame->frameSize[bufferUpToDate] == 0)
             {
                 Serial.println("Could not find valid buffer");
                 bufferUpToDate = 0xFF;

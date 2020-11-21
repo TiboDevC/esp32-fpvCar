@@ -59,26 +59,28 @@ void handleNotFound()
     client.println();
 }
 
-[[noreturn]] void captureProcess( void * parameter) {
+[[noreturn]] void captureProcess(void *parameter)
+{
     Serial.println("Start captureProcess task");
 
-    auto* frame = static_cast<Frame*>(parameter);
+    auto *frame = static_cast<Frame *>(parameter);
 
     Camera cameraTool{frame};
 
-    for(;;) {
+    for (;;)
+    {
         cameraTool.captureImage();
     }
 }
 
-[[noreturn]] void mainTask(void* parameter)
+[[noreturn]] void mainTask(void *parameter)
 {
     StreamOverWebsocket streamOverWebsocket{};
     TickType_t xLastWakeTime;
     constexpr uint8_t FPS{20};
     const TickType_t xFrequency = pdMS_TO_TICKS(1000 / FPS);
 
-    auto* frameState = static_cast<Frame*>(parameter);
+    auto *frameState = static_cast<Frame *>(parameter);
 
     for (;;)
     {

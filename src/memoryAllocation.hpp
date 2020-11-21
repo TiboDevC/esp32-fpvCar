@@ -24,6 +24,7 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize)
         ESP.restart();
     }
 
-    Serial.printf("\nallocateMemory: allocated: %d, free heap (start)  : %d, return address %p\n", aSize, ESP.getFreeHeap(), ptr);
+    Serial.printf("\nallocateMemory: allocated: %d, free heap (start)  : %d, return address %p\n", aSize,
+                  ESP.getFreeHeap(), ptr);
     return ptr;
 }
