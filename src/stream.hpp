@@ -49,11 +49,8 @@ public:
 private:
     WebSocketsServer webSocket{81};
 
-    static constexpr uint8_t waitingTimeBeforeSendAbort{50};
-    TickType_t xFrequency{pdMS_TO_TICKS(waitingTimeBeforeSendAbort)};
-
-    uint8_t *camBuf{};
-    size_t camSize{};
+    static constexpr uint8_t waitingTimeBeforeTryOtherBuffer{5};
+    TickType_t xFrequency{pdMS_TO_TICKS(waitingTimeBeforeTryOtherBuffer)};
 
     static uint8_t getIndexBywebsocketId(const uint8_t &webSocketClientId);
 
@@ -152,18 +149,30 @@ uint8_t StreamOverWebsocket::getIndexBywebsocketId(const uint8_t &webSocketClien
 
 void StreamOverWebsocket::streamImgToAllClients(Frame *frame)
 {
-    if (frame->buffSize > 0 and not streamInfoAllClients.empty())
+    if (not streamInfoAllClients.empty())
     {
-        if (xSemaphoreTake(frame->frameSync, xFrequency))
+        uint8_t bufferUpToDate = frame->bufferUpToDate;
+        if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], xFrequency) or frame->frameSize[bufferUpToDate] == 0)
+        {
+            bufferUpToDate++;
+            bufferUpToDate %= Frame::numberOfFrameSaved;
+            if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], xFrequency) or frame->frameSize[bufferUpToDate] == 0)
+            {
+                Serial.println("Could not find valid buffer");
+                bufferUpToDate = 0xFF;
+            }
+        }
+        if (bufferUpToDate != 0xFF)
         {
             for (const auto &webSocketClientId : streamInfoAllClients)
             {
-                webSocket.sendBIN(webSocketClientId.webSocketClientId, frame->buffToSend, frame->buffSize);
+                webSocket.sendBIN(webSocketClientId.webSocketClientId, frame->buffToSend[bufferUpToDate],
+                                  frame->frameSize[bufferUpToDate]);
             }
-            xSemaphoreGive(frame->frameSync);
+            xSemaphoreGive(frame->frameSync[bufferUpToDate]);
         } else
         {
-            Serial.println("Err: fail taken semaphor streaming");
+            Serial.println("Err: fail finding valid buffer");
         }
     }
 }

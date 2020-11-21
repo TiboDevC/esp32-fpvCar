@@ -9,6 +9,7 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize)
     //  Since current buffer is too small, free it
     if (aPtr != nullptr)
     {
+        Serial.printf("Reallocate memory of %p\n", aPtr);
         free(aPtr);
     }
 
@@ -23,6 +24,6 @@ uint8_t *allocateMemory(uint8_t *aPtr, size_t aSize)
         ESP.restart();
     }
 
-    Serial.printf("\nallocateMemory: allocated: %d, free heap (start)  : %d\n", aSize, ESP.getFreeHeap());
+    Serial.printf("\nallocateMemory: allocated: %d, free heap (start)  : %d, return address %p\n", aSize, ESP.getFreeHeap(), ptr);
     return ptr;
 }

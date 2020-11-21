@@ -23,43 +23,51 @@ public:
 
     void captureImage()
     {
-        bool doAllocateMemory{false};
         //  Grab a frame from the camera and query its size
         camera_fb_t *fb{nullptr};
-
 
         fb = esp_camera_fb_get();
         const size_t sizePicture = fb->len;
 
         //  If frame size is more that we have previously allocated - request  125% of the current frame space
-        if (sizePicture > camSize[currentFrame])
+        if (sizePicture > camSize)
         {
-            doAllocateMemory = true;
-            camSize[currentFrame] = sizePicture + sizePicture / 4;
-            camBuf[currentFrame] = allocateMemory(camBuf[currentFrame], camSize[currentFrame]);
+            camSize = sizePicture + sizePicture / 4;
+            camBuf = allocateMemory(camBuf, camSize);
         }
 
         //  Copy current frame into local buffer
         auto bufferPointer = (uint8_t *) fb->buf;
-        memcpy(camBuf[currentFrame], bufferPointer, sizePicture);
+        memcpy(camBuf, bufferPointer, sizePicture);
         esp_camera_fb_return(fb);
 
-        if (xSemaphoreTake(frame->frameSync, waitingTicks))
+        uint8_t bufferUpToDate{frame->bufferUpToDate};
+        bufferUpToDate++;
+        bufferUpToDate %= Frame::numberOfFrameSaved;
+
+        if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], waitingTicks))
         {
-            if (doAllocateMemory)
+            bufferUpToDate++;
+            bufferUpToDate %= Frame::numberOfFrameSaved;
+            if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], waitingTicks))
             {
-                frame->buffToSend = allocateMemory(frame->buffToSend, camSize[currentFrame]);
+                bufferUpToDate = 0xFF;
+                Serial.println("Fail copying buffer");
             }
-            frame->buffSize = sizePicture;
-            memcpy(frame->buffToSend, camBuf[currentFrame], sizePicture);
-            xSemaphoreGive(frame->frameSync);
+        }
+        if (bufferUpToDate != 0xFF)
+        {
+            if (sizePicture > frame->buffSize[bufferUpToDate])
+            {
+                frame->buffToSend[bufferUpToDate] = allocateMemory(frame->buffToSend[bufferUpToDate], sizePicture);
+                frame->buffSize[bufferUpToDate] = sizePicture;
+            }
+            frame->frameSize[bufferUpToDate] = sizePicture;
+            memcpy(frame->buffToSend[bufferUpToDate], camBuf, sizePicture);
+            xSemaphoreGive(frame->frameSync[bufferUpToDate]);
+            frame->bufferUpToDate = bufferUpToDate;
         }
 
-        currentFrame++;
-        if (currentFrame > (numberOfFrames - 1))
-        {
-            currentFrame = 0;
-        }
         taskYIELD();
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
@@ -68,15 +76,10 @@ public:
 private:
     Frame *frame{};
     TickType_t xLastWakeTime;
-    static constexpr uint8_t FPS{20};
-    static constexpr uint8_t waitingTicks{10}; // very short time, no need to block core0
+    static constexpr uint8_t FPS{25};
+    const TickType_t waitingTicks{pdMS_TO_TICKS(8)};
     const TickType_t xFrequency{pdMS_TO_TICKS(1000 / FPS)};
 
-    //  Pointers to the 2 frames, their respective sizes and index of the current frame
-    static constexpr uint8_t numberOfFrames{2};
-
-    uint8_t *camBuf[numberOfFrames]{};
-    size_t camSize[numberOfFrames]{};
-
-    uint8_t currentFrame{0};
+    uint8_t *camBuf{};
+    size_t camSize{};
 };

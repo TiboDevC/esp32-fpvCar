@@ -71,6 +71,26 @@ void handleNotFound()
     }
 }
 
+[[noreturn]] void mainTask(void* parameter)
+{
+    StreamOverWebsocket streamOverWebsocket{};
+    TickType_t xLastWakeTime;
+    constexpr uint8_t FPS{20};
+    const TickType_t xFrequency = pdMS_TO_TICKS(1000 / FPS);
+
+    auto* frameState = static_cast<Frame*>(parameter);
+
+    for (;;)
+    {
+        wifiServer.handleClient();
+        streamOverWebsocket.checkMessageArrival();
+        streamOverWebsocket.streamImgToAllClients(frameState);
+
+        taskYIELD();
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
 // ==== SETUP method ==================================================================
 void setup()
 {
@@ -103,29 +123,31 @@ void setup()
 
     Serial.printf("Web server started, open %s in a web browser\n", WiFi.localIP().toString().c_str());
 
-    StreamOverWebsocket streamOverWebsocket{};
-
-    Frame *frameState = new Frame;
+    auto *frameState = new Frame;
 
     TaskHandle_t tCaptureImage;
+    TaskHandle_t tMainTask;
 
     xTaskCreatePinnedToCore(
             captureProcess,     /* Function to implement the task */
             "Task1",            /* Name of the task */
-            10000,              /* Stack size in words */
+            30000,              /* Stack size in words */
             frameState,         /* Task input parameter */
-            2,                  /* Priority of the task */
+            3,                  /* Priority of the task */
             &tCaptureImage,     /* Task handle. */
             0);                 /* Core where the task should run */
 
-    for (;;)
-    {
-        wifiServer.handleClient();
-        streamOverWebsocket.checkMessageArrival();
-        streamOverWebsocket.streamImgToAllClients(frameState);
-    }
+    xTaskCreatePinnedToCore(
+            mainTask,     /* Function to implement the task */
+            "Task1",            /* Name of the task */
+            10000,              /* Stack size in words */
+            frameState,         /* Task input parameter */
+            2,                  /* Priority of the task */
+            &tMainTask,      /* Task handle. */
+            1);                 /* Core where the task should run */
 }
 
 void loop()
 {
+    vTaskDelay(1000);
 }
