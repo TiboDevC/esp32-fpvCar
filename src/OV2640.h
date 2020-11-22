@@ -52,8 +52,10 @@ static camera_config_t camera_config = {
         .fb_count = 1 //if more than one, i2s runs in continuous mode. Use only with JPEG
 };
 
-esp_err_t camera_init()
+esp_err_t camera_init(const framesize_t &frameSize = FRAMESIZE_QVGA)
 {
+    Serial.println("Reset camera settings");
+    esp_camera_deinit();
     Serial.println("Init camera");
     //power up the camera if PWDN pin is defined
     if (CAM_PIN_PWDN != -1)
@@ -61,6 +63,8 @@ esp_err_t camera_init()
         pinMode(CAM_PIN_PWDN, OUTPUT);
         digitalWrite(CAM_PIN_PWDN, LOW);
     }
+
+    camera_config.frame_size = frameSize;
 
     //initialize the camera
     esp_err_t err = esp_camera_init(&camera_config);

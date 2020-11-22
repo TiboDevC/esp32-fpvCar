@@ -14,11 +14,11 @@ public:
 
     explicit Camera(Frame *pFrame)
     {
+        assert(not(pFrame == nullptr) and "Err: pointer must be initialized");
         Serial.print("Camera class running on core ");
         camera_init();
         Serial.println(xPortGetCoreID());
         frame = pFrame;
-        xLastWakeTime = xTaskGetTickCount();
     }
 
     void captureImage()
@@ -67,18 +67,18 @@ public:
             xSemaphoreGive(frame->frameSync[bufferUpToDate]);
             frame->bufferUpToDate = bufferUpToDate;
         }
+    }
 
-        taskYIELD();
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    static void resizeCamera(const uint8_t &resolution)
+    {
+        camera_init(static_cast<framesize_t>(resolution));
     }
 
 
 private:
+    const TickType_t waitingTicks{pdMS_TO_TICKS(4)};
+
     Frame *frame{};
-    TickType_t xLastWakeTime;
-    static constexpr uint8_t FPS{25};
-    const TickType_t waitingTicks{pdMS_TO_TICKS(8)};
-    const TickType_t xFrequency{pdMS_TO_TICKS(1000 / FPS)};
 
     uint8_t *camBuf{};
     size_t camSize{};

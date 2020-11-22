@@ -7,61 +7,68 @@
 #include "memoryAllocation.hpp"
 #include "imageParams.hpp"
 
-
-static constexpr uint8_t invalidWebSocketId{0xFF};
-
-struct StreamInfo
+namespace Streaming
 {
-    uint8_t webSocketClientId{invalidWebSocketId};
-    bool isPilot{false};
+    static constexpr uint8_t invalidValue{0xFF};
 
-    explicit StreamInfo(const uint8_t &clientId)
+    struct StreamInfo
     {
-        webSocketClientId = clientId;
-    }
-};
+        uint8_t webSocketClientId{invalidValue};
+        bool isPilot{false};
 
-std::vector<StreamInfo> streamInfoAllClients;
+        explicit StreamInfo(const uint8_t &clientId)
+        {
+            webSocketClientId = clientId;
+        }
+    };
 
-class StreamOverWebsocket
-{
-public:
-    void streamImgToAllClients(Frame *frame);
+    std::vector<StreamInfo> streamInfoAllClients;
 
-    void voidSendText(char *stringToSend, const uint8_t &webSocketClientId)
+    bool notifyPilotChange{false};
+    uint8_t newCameraResolution{invalidValue};
+
+    class StreamOverWebsocket
     {
-        webSocket.sendTXT(webSocketClientId, stringToSend);
-    }
+    public:
+        StreamOverWebsocket()
+        {
+            Serial.printf("Camera StreamOverWebsocket running on core %d\n", xPortGetCoreID());
+            webSocket.begin();
+            webSocket.onEvent(onWebSocketEvent);
+        }
 
-    StreamOverWebsocket()
-    {
-        Serial.print("Camera StreamOverWebsocket running on core ");
-        Serial.println(xPortGetCoreID());
-        webSocket.begin();
-        webSocket.onEvent(onWebSocketEvent);
-    }
+        void loop(Frame *frame)
+        {
+            streamImgToAllClients(frame);
+            changeCameraResolution(frame);
+            webSocket.loop();
+            notifyPilotStatus();
+        }
 
-    void checkMessageArrival()
-    {
-        webSocket.loop();
-    }
+    private:
 
-private:
-    WebSocketsServer webSocket{81};
+        WebSocketsServer webSocket{81};
+        static constexpr uint8_t waitingTimeBeforeTryOtherBuffer{5};
 
-    static constexpr uint8_t waitingTimeBeforeTryOtherBuffer{5};
-    TickType_t xFrequency{pdMS_TO_TICKS(waitingTimeBeforeTryOtherBuffer)};
+        TickType_t xFrequency{pdMS_TO_TICKS(waitingTimeBeforeTryOtherBuffer)};
 
-    static uint8_t getIndexBywebsocketId(const uint8_t &webSocketClientId);
+        static uint8_t getIndexBywebsocketId(const uint8_t &webSocketClientId);
 
-    // Called when receiving any WebSocket message
-    static void onWebSocketEvent(uint8_t num,
-                                 WStype_t type,
-                                 uint8_t *payload,
-                                 size_t length);
-};
+        // Called when receiving any WebSocket message
+        static void onWebSocketEvent(uint8_t num,
+                                     WStype_t type,
+                                     uint8_t *payload,
+                                     size_t length);
 
-void StreamOverWebsocket::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+        void streamImgToAllClients(Frame *frame);
+
+        void notifyPilotStatus();
+
+        void changeCameraResolution(Frame *frame);
+    };
+}
+
+void Streaming::StreamOverWebsocket::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
 {
 
     // Figure out the type of WebSocket event
@@ -110,13 +117,18 @@ void StreamOverWebsocket::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *
                             const uint8_t index{getIndexBywebsocketId(num)};
                             streamInfoAllClients[index].isPilot = true;
                             Serial.printf("ID %d, index %d is now pilot!\n", num, getIndexBywebsocketId(num));
+                            notifyPilotChange = true;
                         }
                     } else
                     {
                         const uint8_t index{getIndexBywebsocketId(num)};
                         streamInfoAllClients[index].isPilot = false;
                         Serial.printf("ID %d, index %d is now spectator\n", num, getIndexBywebsocketId(num));
+                        notifyPilotChange = true;
                     }
+                } else if (doc.containsKey("frameSize"))
+                {
+                    newCameraResolution = doc["frameSize"];
                 }
             }
         }
@@ -135,7 +147,7 @@ void StreamOverWebsocket::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *
     }
 }
 
-uint8_t StreamOverWebsocket::getIndexBywebsocketId(const uint8_t &webSocketClientId)
+uint8_t Streaming::StreamOverWebsocket::getIndexBywebsocketId(const uint8_t &webSocketClientId)
 {
     for (const auto &streamInfoAllClient : streamInfoAllClients)
     {
@@ -144,36 +156,66 @@ uint8_t StreamOverWebsocket::getIndexBywebsocketId(const uint8_t &webSocketClien
             return webSocketClientId;
         }
     }
-    return invalidWebSocketId;
+    return invalidValue;
 }
 
-void StreamOverWebsocket::streamImgToAllClients(Frame *frame)
+void Streaming::StreamOverWebsocket::streamImgToAllClients(Frame *frame)
 {
-    if (not streamInfoAllClients.empty())
+    if (not streamInfoAllClients.empty() and frame != nullptr)
     {
-        uint8_t bufferUpToDate = frame->bufferUpToDate;
-        if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], xFrequency) or frame->frameSize[bufferUpToDate] == 0)
+        for (const auto &webSocketClientId : streamInfoAllClients)
         {
-            bufferUpToDate++;
-            bufferUpToDate %= Frame::numberOfFrameSaved;
+            uint8_t bufferUpToDate = frame->bufferUpToDate;
             if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], xFrequency) or
                 frame->frameSize[bufferUpToDate] == 0)
             {
-                Serial.println("Could not find valid buffer");
-                bufferUpToDate = 0xFF;
+                bufferUpToDate++;
+                bufferUpToDate %= Frame::numberOfFrameSaved;
+                if (not xSemaphoreTake(frame->frameSync[bufferUpToDate], xFrequency) or
+                    frame->frameSize[bufferUpToDate] == 0)
+                {
+                    Serial.println("Could not find valid buffer");
+                    bufferUpToDate = 0xFF;
+                }
             }
-        }
-        if (bufferUpToDate != 0xFF)
-        {
-            for (const auto &webSocketClientId : streamInfoAllClients)
+            if (bufferUpToDate != 0xFF)
             {
                 webSocket.sendBIN(webSocketClientId.webSocketClientId, frame->buffToSend[bufferUpToDate],
                                   frame->frameSize[bufferUpToDate]);
+                xSemaphoreGive(frame->frameSync[bufferUpToDate]);
+            } else
+            {
+                Serial.println("Err: fail finding valid buffer");
             }
-            xSemaphoreGive(frame->frameSync[bufferUpToDate]);
-        } else
-        {
-            Serial.println("Err: fail finding valid buffer");
         }
+    }
+}
+
+void Streaming::StreamOverWebsocket::notifyPilotStatus()
+{
+    if (notifyPilotChange)
+    {
+        for (const auto &streamInfoAllClient :  streamInfoAllClients)
+        {
+            std::string pilotStatus = "{\"isPilot\": ";
+            if (streamInfoAllClient.isPilot)
+            {
+                pilotStatus += "1 }";
+            } else
+            {
+                pilotStatus += "0 }";
+            }
+            notifyPilotChange = false;
+            webSocket.sendTXT(streamInfoAllClient.webSocketClientId, pilotStatus.c_str());
+        }
+    }
+}
+
+void Streaming::StreamOverWebsocket::changeCameraResolution(Frame *frame)
+{
+    if (newCameraResolution != invalidValue)
+    {
+        xQueueSend(frame->queueFrameSize, &newCameraResolution, 20);
+        newCameraResolution = invalidValue;
     }
 }

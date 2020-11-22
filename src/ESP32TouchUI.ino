@@ -62,6 +62,9 @@ void handleNotFound()
 [[noreturn]] void captureProcess(void *parameter)
 {
     Serial.println("Start captureProcess task");
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    static constexpr uint8_t FPS{50};
+    const TickType_t xFrequency{pdMS_TO_TICKS(1000 / FPS)};
 
     auto *frame = static_cast<Frame *>(parameter);
 
@@ -70,26 +73,52 @@ void handleNotFound()
     for (;;)
     {
         cameraTool.captureImage();
+        taskYIELD();
+
+        uint8_t element;
+
+        for (int i = 0; i < Frame::queueSize; i++)
+        {
+            if (xQueueReceive(frame->queueFrameSize, &element, 5))
+            {
+                Serial.printf("resize to: %d\n", element);
+                Camera::resizeCamera(element);
+            }
+        }
+        taskYIELD();
     }
 }
 
 [[noreturn]] void mainTask(void *parameter)
 {
-    StreamOverWebsocket streamOverWebsocket{};
-    TickType_t xLastWakeTime;
-    constexpr uint8_t FPS{20};
-    const TickType_t xFrequency = pdMS_TO_TICKS(1000 / FPS);
+    Streaming::StreamOverWebsocket streamOverWebsocket{};
 
     auto *frameState = static_cast<Frame *>(parameter);
 
     for (;;)
     {
         wifiServer.handleClient();
-        streamOverWebsocket.checkMessageArrival();
-        streamOverWebsocket.streamImgToAllClients(frameState);
+        streamOverWebsocket.loop(frameState);
 
         taskYIELD();
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
+[[noreturn]] void idlTask0(void *parameter)
+{
+    for (;;)
+    {
+        Serial.printf("Idle on core %d\n", xPortGetCoreID());
+        taskYIELD();
+    }
+}
+
+[[noreturn]] void idlTask1(void *parameter)
+{
+    for (;;)
+    {
+        Serial.printf("Idle on core %d\n", xPortGetCoreID());
+        taskYIELD();
     }
 }
 
@@ -132,16 +161,16 @@ void setup()
 
     xTaskCreatePinnedToCore(
             captureProcess,     /* Function to implement the task */
-            "Task1",            /* Name of the task */
+            "captureProcess",            /* Name of the task */
             30000,              /* Stack size in words */
             frameState,         /* Task input parameter */
-            3,                  /* Priority of the task */
+            2,                  /* Priority of the task */
             &tCaptureImage,     /* Task handle. */
             0);                 /* Core where the task should run */
 
     xTaskCreatePinnedToCore(
             mainTask,     /* Function to implement the task */
-            "Task1",            /* Name of the task */
+            "mainTask",            /* Name of the task */
             10000,              /* Stack size in words */
             frameState,         /* Task input parameter */
             2,                  /* Priority of the task */

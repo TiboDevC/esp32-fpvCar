@@ -162,7 +162,8 @@
             leftTouchID = -1,
             leftTouchPos = new Vector2(0, 0),
             leftTouchStartPos = new Vector2(0, 0),
-            leftVector = new Vector2(0, 0);
+            leftVector = new Vector2(0, 0),
+            frameSize = 5;
 
         var temperature;
         var sendFlag = false;
@@ -332,7 +333,6 @@
             // console.log('Data received: ' + event.data);
             // console.log(typeof event.data);
 
-            let voltage;
             if (typeof event.data === 'string') {
                 console.log('Data received: ' + event.data);
                 console.log(typeof event.data);
@@ -352,7 +352,7 @@
                     }
                 }
             } else {
-                console.log('New image received');
+                // console.log('New image received');
                 imageCounterFps++;
 
                 const pixels = new Uint8Array(event.data);
@@ -365,7 +365,6 @@
                 document.getElementById("imgStream").src = URL.createObjectURL(blob);
             }
         }
-
 
         window.addEventListener('resize', resizeStream, false);
 
@@ -556,10 +555,10 @@
 
 
         takePicture = function (el) {
-            //websock.send(JSON.stringify({ cmd : "cam", val : 1 }));
-            const canvas = document.getElementById("imgStream");
-            const image = canvas.toDataURL("image/jpg");
-            el.href = image;
+            frameSize++;
+            frameSize %= 10;
+            websock.send(JSON.stringify({"frameSize": frameSize}));
+            document.getElementById('cam').innerHTML = "CAM (" + frameSize + ")";
         }
 
         function shutdown() {
